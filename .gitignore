@@ -1,0 +1,8 @@
+results/
+fpga_reconfig_study/
+.Xil/
+*.jou
+*.log
+*.vvp
+*.bit
+*.ltx

@@ -1,0 +1,102 @@
+[
+  {
+    "id": 0,
+    "name": "aligned_small",
+    "layers": 1,
+    "n_in": 4,
+    "n_class": 4,
+    "note": "Four one-hot patterns. The label matches the reset wiring.",
+    "n_train": 16,
+    "n_test": 4
+  },
+  {
+    "id": 1,
+    "name": "permuted_small",
+    "layers": 1,
+    "n_in": 4,
+    "n_class": 4,
+    "note": "Same four patterns. The label is rotated, so the reset wiring is wrong.",
+    "n_train": 16,
+    "n_test": 4
+  },
+  {
+    "id": 2,
+    "name": "switched_small",
+    "layers": 1,
+    "n_in": 4,
+    "n_class": 4,
+    "note": "Train the aligned labels, then train the rotated labels. Test both regimes.",
+    "n_train": 48,
+    "n_test": 8
+  },
+  {
+    "id": 3,
+    "name": "noisy_small",
+    "layers": 1,
+    "n_in": 4,
+    "n_class": 4,
+    "note": "Aligned labels, plus one extra active input that is not the class.",
+    "n_train": 16,
+    "n_test": 4
+  },
+  {
+    "id": 4,
+    "name": "random_small",
+    "layers": 1,
+    "n_in": 4,
+    "n_class": 4,
+    "note": "Random 4-bit patterns and random labels. There is no class structure.",
+    "n_train": 16,
+    "n_test": 8
+  },
+  {
+    "id": 5,
+    "name": "distinct64",
+    "layers": 1,
+    "n_in": 64,
+    "n_class": 10,
+    "note": "Ten classes on 64 inputs. Each class owns three pixels and shares none. The pixels sit past the eight inputs a reset mux can see.",
+    "n_train": 40,
+    "n_test": 10
+  },
+  {
+    "id": 6,
+    "name": "distinct64_3layer",
+    "layers": 3,
+    "n_in": 64,
+    "n_class": 10,
+    "note": "The same disjoint classes through three mux layers. A recruited spike has to cross each layer.",
+    "n_train": 60,
+    "n_test": 10
+  },
+  {
+    "id": 7,
+    "name": "glyphs64",
+    "layers": 1,
+    "n_in": 64,
+    "n_class": 10,
+    "note": "Ten 8x8 digit drawings. Strokes overlap, so the earliest ink pixel is not private to one class.",
+    "n_train": 40,
+    "n_test": 10
+  },
+  {
+    "id": 8,
+    "name": "glyphs64_noise",
+    "layers": 1,
+    "n_in": 64,
+    "n_class": 10,
+    "note": "Digit drawings plus three random pixels in addresses 0..15. Those addresses are exactly where a reset mux looks, and they change between samples.",
+    "n_train": 40,
+    "n_test": 10
+  },
+  {
+    "id": 9,
+    "name": "permuted_3layer",
+    "layers": 3,
+    "n_in": 4,
+    "n_class": 4,
+    "note": "Rotated labels again, with three hidden mux layers instead of one.",
+    "n_train": 24,
+    "n_test": 4
+  }
+]
