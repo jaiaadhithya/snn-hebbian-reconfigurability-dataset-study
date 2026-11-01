@@ -1,6 +1,6 @@
 # Run the sweep on the ZedBoard
 
-The bitstream holds the network, the 84 shapes, and the datasets. The lab PC sends two bytes, the dataset and the topology, then records what the board sends back. There is no ADC and no button. The samples are already in `rtl/study_rom.v`.
+The bitstream holds the network, the 84 shapes, and the datasets. The lab PC sends the command from the console, then records what the board sends back. There is no ADC, no button, and no switch. The samples are already in `rtl/study_rom.v`.
 
 The lab PC does not need Icarus. Python only needs `pyserial`. Vivado builds the bitstream and programs the programmable logic. The console talks to a USB-serial adapter.
 
@@ -78,26 +78,22 @@ If `synth_1` fails, open the run log from the Vivado console before launching im
 
 ## 5. Program the FPGA
 
-1. Slide **SW0 up**. Up holds the design in reset.
-2. In Vivado: **Flow → Open Hardware Manager → Open Target → Auto Connect**.
-3. Select the Zynq device and **Program Device**.
-4. Choose `study_top.bit`.
-5. Program the programmable logic only. Do not add a boot image, an FSBL, or a Linux image.
-6. Leave SW0 up until programming finishes.
+1. In Vivado: **Flow → Open Hardware Manager → Open Target → Auto Connect**.
+2. Select the Zynq device and **Program Device**.
+3. Choose `study_top.bit`.
+4. Program the programmable logic only. Do not add a boot image, an FSBL, or a Linux image.
 
-## 6. Release reset
+Leave every switch where it is. The design releases its own reset after configuration and waits. It does not start a sweep on its own. LD7 stays off until the console sends a command.
 
-Slide **SW0 down**.
+An older bitstream still uses SW0 as reset. Program this `study_top.bit` before using the console. Programming uses the PROG cable. It does not need a switch.
 
-The board waits. It does not start a sweep on its own. LD7 stays off until the console sends a command.
-
-## 7. Find the adapter COM port
+## 6. Find the adapter COM port
 
 Open Device Manager and expand **Ports (COM & LPT)**. Use the port that belongs to the USB-serial adapter, for example `COM5`.
 
 Do not use the Digilent or Cypress port from the PROG cable. Close any serial terminal that has the adapter port open.
 
-## 8. Run the console
+## 7. Run the console
 
 ```bat
 python tools\study_console.py
@@ -110,15 +106,15 @@ On a lab PC without Icarus, **Port** starts as `COM5`. Change it to the adapter 
 3. Set **Port** to the adapter COM port.
 4. Press **Run**.
 
-The console sends the dataset byte and then the topology byte. **All topologies** walks 84 shapes. Each live layer is 2, 4, 6, or 8 neurons, chosen on its own. One layer has 4 shapes, two layers have 16, and three layers have 64. A single topology runs that shape with learning on, then the same shape frozen.
+The console sends a sync byte, then the dataset byte, then the topology byte. Press **Run** again to start another selection. That stops whatever the board was doing and starts the selection you picked. **All topologies** walks 84 shapes. Each live layer is 2, 4, 6, or 8 neurons, chosen on its own. One layer has 4 shapes, two layers have 16, and three layers have 64. A single topology runs that shape with learning on, then the same shape frozen.
 
 The diagram draws the shape that is running. Neuron 0 of every column is on the same row. A blue arrow is the one mux into a hidden neuron. A green arrow is its strong output class. Under the diagram, each test input appears with its label and the class the network chose. The score shows neurons, spikes, and energy. Energy is one mux event per hidden spike, plus one addition into each class for every last-layer spike.
 
 **Topology** switches among finished shapes. **Results** names the learned shape with the best accuracy, and a cheaper shape when another learned shape ties that accuracy at lower energy.
 
-LD7 turns on when the sweep starts and turns off when the board is waiting again. Leave SW0 down and press Run to start another selection.
+LD7 turns on when the sweep starts and turns off when the board is waiting again.
 
-## 9. Files
+## 8. Files
 
 Each Run creates `results\sweeps\<date>_<time>\`. Lines are written as they arrive.
 
@@ -133,7 +129,7 @@ Each Run creates `results\sweeps\<date>_<time>\`. Lines are written as they arri
 
 Git ignores `results/`. The folder is still on disk. Open it in File Explorer.
 
-## 10. LEDs
+## 9. LEDs
 
 | LED | Meaning |
 | --- | --- |
@@ -147,11 +143,10 @@ Git ignores `results/`. The folder is still on disk. Open it in File Explorer.
 
 The status line says so after about 20 seconds.
 
-1. SW0 must be down. Up is reset, and a command sent during reset is ignored.
-2. JA pin 1 must go to the adapter RX, and JA pin 2 to the adapter TX.
-3. **Port** must be the adapter COM port, not the PROG cable, and not the word `Icarus`.
-4. The programmed file must be `study_top.bit` from this build.
-5. Slide SW0 up, then down, and press Run again.
+1. JA pin 1 must go to the adapter RX, and JA pin 2 to the adapter TX.
+2. **Port** must be the adapter COM port, not the PROG cable, and not the word `Icarus`.
+3. The programmed file must be `study_top.bit` from this build. An older file still waits on SW0.
+4. Press **Run** again. The sync byte puts the board back to waiting, then the command starts.
 
 ## Simulate on a PC that has Icarus
 

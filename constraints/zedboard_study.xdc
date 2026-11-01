@@ -1,13 +1,10 @@
 # ZedBoard XC7Z020-clg484-1. Samples live in the bitstream.
-# PMOD JA pin 1 (Y11) is the only data path back to the laptop.
+# PMOD JA pin 1 (Y11) sends scores. PMOD JA pin 2 (AA11) receives the command.
+# Reset is internal. No switch is connected.
 
 set_property PACKAGE_PIN Y9 [get_ports clk]
 set_property IOSTANDARD LVCMOS33 [get_ports clk]
 create_clock -period 8.000 -name sys_clk [get_ports clk]
-
-# SW0 up = reset. The study restarts from case 0.
-set_property PACKAGE_PIN F22 [get_ports rst]
-set_property IOSTANDARD LVCMOS18 [get_ports rst]
 
 set_property PACKAGE_PIN T22 [get_ports {leds[0]}]
 set_property PACKAGE_PIN T21 [get_ports {leds[1]}]

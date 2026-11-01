@@ -397,7 +397,7 @@ class PaperApp(tk.Tk):
         else:
             topo_byte = next(index for index, shape in enumerate(self.shapes) if shape["label"] == topo_name)
             label = f"{label}, {topo_name}, learned then frozen"
-        command = bytes([case_byte, topo_byte])
+        command = bytes([0xFE, case_byte, topo_byte])
         stamp = time.strftime("%Y%m%d_%H%M%S")
         folder = os.path.join(ROOT, "results", "sweeps", stamp)
         try:
@@ -452,7 +452,7 @@ class PaperApp(tk.Tk):
                 data = ser.read(4096)
                 if not data:
                     if not self.rows and time.time() - quiet > 20:
-                        self.events.put(("status", "No UART yet. SW0 should be down, JA1 to adapter RX, JA2 to adapter TX."))
+                        self.events.put(("status", "No UART yet. JA1 goes to adapter RX, JA2 to adapter TX. No switch is used."))
                         break
                     if self.rows and time.time() - quiet > 8:
                         break
@@ -525,7 +525,7 @@ class PaperApp(tk.Tk):
             return
         self.events.put(("status", "Icarus is running this selection. The list fills as each shape finishes."))
         proc = subprocess.Popen(
-            [vvp, VVP_PATH, f"+CASE={command[0]}", f"+TOPO={command[1]}"],
+            [vvp, VVP_PATH, f"+CASE={command[1]}", f"+TOPO={command[2]}"],
             cwd=ROOT,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

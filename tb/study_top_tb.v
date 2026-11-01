@@ -4,7 +4,6 @@
 
 module study_top_tb;
   reg clk = 0;
-  reg rst = 1;
   reg uart_rx = 1;
   wire uart_tx;
   wire [7:0] leds;
@@ -16,7 +15,6 @@ module study_top_tb;
 
   study_top #(.CLK_HZ(CLK_HZ), .BAUD(BAUD)) dut (
     .clk(clk),
-    .rst(rst),
     .uart_rx(uart_rx),
     .uart_tx(uart_tx),
     .leds(leds)
@@ -56,15 +54,14 @@ module study_top_tb;
     rx_busy = 0;
     saw_z = 0;
     cycles = 0;
-    repeat (8) @(posedge clk);
-    rst = 0;
-    repeat (20) @(posedge clk);
+    repeat (40) @(posedge clk);
+    send_byte(8'hFE);
     send_byte(cmd_case[7:0]);
     send_byte(cmd_topo[7:0]);
   end
 
   always @(posedge clk) begin
-    if (!rst) begin
+    begin
       cycles = cycles + 1;
       if (cycles == 400000000) begin
         $display("TIMEOUT");

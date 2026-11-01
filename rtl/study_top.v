@@ -3,8 +3,10 @@
 // combination. Each live layer is 2, 4, 6, or 8 neurons, chosen on its
 // own: 4 one-layer shapes, 16 two-layer shapes, 64 three-layer shapes.
 // Learning runs all 84, then the same 84 run frozen.
-// First UART byte: '0'..'9' one dataset, 'A' every dataset.
-// Second byte: 0..83 one shape, 8'hFF every shape.
+// The board releases reset by itself after configuration. No switch.
+// UART: 8'hFE returns to idle from any state, then a command.
+// Command byte 1: '0'..'9' one dataset, 'A' every dataset.
+// Command byte 2: 0..83 one shape, 8'hFF every shape.
 // One shape runs learned, then frozen. All shapes do the same.
 // Scores, rasters, and the final mux map leave on uart_tx.
 
@@ -13,7 +15,6 @@ module study_top #(
   parameter integer BAUD   = 115200
 )(
   input  wire       clk,
-  input  wire       rst,
   input  wire       uart_rx,
   output wire       uart_tx,
   output wire [7:0] leds
@@ -95,6 +96,12 @@ module study_top #(
   wire [3*8*6-1:0] mux_bus;
   wire [7:0] rx_data;
   wire       rx_valid;
+  // Eight clocks high after configuration, then stays low. SW0 is not used.
+  reg [7:0] por_sr = 8'hFF;
+  always @(posedge clk)
+    por_sr <= {por_sr[6:0], 1'b0};
+  wire rst = por_sr[7];
+  wire cmd_sync = rx_valid && (rx_data == 8'hFE);
 
   reg [3:0] use_layers;
   reg [3:0] use_h0;
@@ -223,7 +230,7 @@ module study_top #(
   // Byte pump. A message is armed for one clock, then bytes wait for the
   // transmitter to accept each one before the next is offered.
   always @(posedge clk) begin
-    if (rst) begin
+    if (rst || cmd_sync) begin
       pst <= PS_IDLE;
       idx <= 7'd0;
       tx_valid <= 1'b0;
@@ -281,7 +288,12 @@ module study_top #(
       pass_rst <= 1'b0;
       go <= 1'b0;
       arm <= 1'b0;
-      case (state)
+      if (cmd_sync) begin
+        state <= ST_IDLE;
+        run_all <= 1'b0;
+        sweep_one <= 1'b0;
+        finished <= 1'b0;
+      end else case (state)
         ST_IDLE: begin
           if (rx_valid) begin
             if (rx_data >= "0" && rx_data <= "9") begin

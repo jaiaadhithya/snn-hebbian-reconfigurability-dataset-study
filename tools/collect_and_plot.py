@@ -373,7 +373,7 @@ def read_port(port: str, seconds: float) -> str:
     chunks = []
     started = time.time()
     last = None
-    print(f"Listening on {port} at 115200. Flip SW0 down to start the FPGA run.", flush=True)
+    print(f"Listening on {port} at 115200. The console starts the run. No switch is used.", flush=True)
     while True:
         data = ser.read(4096)
         now = time.time()
