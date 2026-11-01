@@ -1,105 +1,160 @@
-# Run the study on the ZedBoard
+# Run the sweep on the ZedBoard
 
-The network runs in the programmable logic. The laptop only builds the bitstream and records the UART stream. The patterns are already inside `rtl/study_rom.v`, so the board does not need an ADC, buttons, or a host feeding samples.
+The bitstream holds the network, the 84 shapes, and the datasets. The lab PC sends two bytes, the dataset and the topology, then records what the board sends back. There is no ADC and no button. The samples are already in `rtl/study_rom.v`.
 
-The USB-UART jack on the ZedBoard goes to the ARM chip. This design does not boot the ARM, so that jack stays silent. The scores come out of PMOD JA pin 1.
+The lab PC does not need Icarus. Python only needs `pyserial`. Vivado builds the bitstream and programs the programmable logic. The console talks to a USB-serial adapter.
+
+The USB-UART jack on the ZedBoard goes to the ARM. This design does not boot the ARM, so that jack stays silent. Use a separate 3.3 V USB-serial adapter on PMOD JA.
+
+An older bitstream that starts by itself will not answer this console. Build `study_top.bit` from this folder before you program the board.
 
 ## What you need
 
-- ZedBoard (XC7Z020-clg484-1)
-- Vivado with Zynq-7000 support
-- A 3.3 V USB-serial adapter (FTDI or similar). Do not use a 5 V TTL adapter.
+- ZedBoard, part XC7Z020-clg484-1
+- Vivado with the Zynq-7000 device XC7Z020
+- A 3.3 V USB-serial adapter. Do not use a 5 V TTL adapter
 - Python 3
 
 ```bat
-pip install pyserial numpy matplotlib
+pip install pyserial
 ```
 
-## 1. Jumpers and power
+Clone this repository and open a shell in the folder that contains `vivado_create.tcl`.
+
+## 1. Power and jumpers
 
 1. Set **JP7** to **JTAG**.
 2. Set **JP8** to **USB**.
-3. Plug the PROG USB cable into the PC.
+3. Plug the PROG USB cable into the lab PC.
 4. Power the board.
 
 ## 2. Serial wire
 
+PMOD JA pin 1 is the pin marked 1 on the silkscreen. Pin 2 is the next pin in that row. Ground is a pin marked GND, pin 5 or pin 11.
+
 | ZedBoard | USB-serial adapter |
 | --- | --- |
-| JA pin 1 (FPGA ball Y11), the pin marked 1 on the JA connector | RX |
-| JA pin 5 or pin 11 (GND) | GND |
+| JA pin 1, FPGA ball Y11 | RX |
+| JA pin 2, FPGA ball AA11 | TX |
+| JA GND, pin 5 or pin 11 | GND |
 
-Leave the adapter’s TX unconnected. Set the adapter to 3.3 V. The FPGA transmits 115200 baud, 8 data bits, no parity, 1 stop bit.
+Set the adapter to 3.3 V. The link is 115200 baud, 8 data bits, no parity, 1 stop bit.
 
-Share one ground. The onboard UART jack is not this port.
+JA pin 1 carries scores from the FPGA to the PC. JA pin 2 carries the command from the PC to the FPGA. Both wires are required. Share one ground. Do not use the onboard UART jack.
 
-## 3. Build the bitstream
+## 3. Create the Vivado project
 
-Open a Vivado Tcl shell, then:
+In a Vivado Tcl shell, from this folder:
 
 ```bat
-cd C:\Users\jaiaa\OneDrive\Desktop\stuff\study\snn-hebbian-reconfigurability-dataset-study
 python tools\gen_datasets.py
 vivado -mode batch -source vivado_create.tcl
 ```
+
+`python tools\gen_datasets.py` rewrites `rtl/study_rom.v` and `cases.json`. Run it before the Vivado script so the ROM in the project is current.
+
+`vivado_create.tcl` creates the project for part `xc7z020clg484-1`. It adds `study_top.v`, `snn_engine.v`, `study_rom.v`, `uart_tx.v`, `uart_rx.v`, and `constraints/zedboard_study.xdc`. The top module is `study_top`.
+
+Close an older project first. The script overwrites `fpga_reconfig_study/fpga_reconfig_study.xpr`.
+
+## 4. Synthesize and write the bitstream
 
 In the Vivado Tcl console:
 
 ```tcl
 open_project fpga_reconfig_study/fpga_reconfig_study.xpr
+reset_run synth_1
 launch_runs synth_1 -jobs 4
 wait_on_run synth_1
 launch_runs impl_1 -to_step write_bitstream -jobs 4
 wait_on_run impl_1
 ```
 
-The bitstream is:
+Wait until both runs report a successful finish. The bitstream is:
 
 `fpga_reconfig_study/fpga_reconfig_study.runs/impl_1/study_top.bit`
 
-Synthesis and implementation run on the PC. After the `.bit` file exists, the study itself runs on the FPGA.
+If `synth_1` fails, open the run log from the Vivado console before launching implementation. Do not program an older `study_top.bit`.
 
-## 4. Hold the FPGA in reset, then program it
+## 5. Program the FPGA
 
-1. Slide **SW0 up**. Up holds the design in reset, so it does not start transmitting before the laptop is listening.
+1. Slide **SW0 up**. Up holds the design in reset.
 2. In Vivado: **Flow → Open Hardware Manager → Open Target → Auto Connect**.
-3. **Program Device** and choose `study_top.bit`.
-4. Program the programmable logic only. There is no FSBL and no Linux image.
-5. Leave SW0 up.
+3. Select the Zynq device and **Program Device**.
+4. Choose `study_top.bit`.
+5. Program the programmable logic only. Do not add a boot image, an FSBL, or a Linux image.
+6. Leave SW0 up until programming finishes.
 
-## 5. Record, then release reset
+## 6. Release reset
 
-Find the adapter’s COM port in Device Manager (not the Digilent or Cypress port that belongs to the PROG cable). Then, with SW0 still up:
+Slide **SW0 down**.
+
+The board waits. It does not start a sweep on its own. LD7 stays off until the console sends a command.
+
+## 7. Find the adapter COM port
+
+Open Device Manager and expand **Ports (COM & LPT)**. Use the port that belongs to the USB-serial adapter, for example `COM5`.
+
+Do not use the Digilent or Cypress port from the PROG cable. Close any serial terminal that has the adapter port open.
+
+## 8. Run the console
 
 ```bat
-cd C:\Users\jaiaa\OneDrive\Desktop\stuff\study\snn-hebbian-reconfigurability-dataset-study
-python tools\collect_and_plot.py --port COM5
+python tools\study_console.py
 ```
 
-Replace `COM5` with the adapter’s port. When the script prints `Listening`, slide **SW0 down**.
+On a lab PC without Icarus, **Port** starts as `COM5`. Change it to the adapter port from Device Manager. Do not type `Icarus`.
 
-The FPGA then runs every case twice, frozen and then reconfigurable, and sends the scores out JA pin 1. The script prints each line as it arrives. When the final `Z` line shows up, the script writes:
+1. Choose one dataset, or **All datasets**.
+2. Choose one topology, or **All topologies**.
+3. Set **Port** to the adapter COM port.
+4. Press **Run**.
 
-- `results/uart_log.txt` — the raw text from the board
-- `results/metrics.csv`
-- `results/summary.png`
-- `results/raster_<case>.png`
-- `results/STUDY_RESULTS.md`
+The console sends the dataset byte and then the topology byte. **All topologies** walks 84 shapes. Each live layer is 2, 4, 6, or 8 neurons, chosen on its own. One layer has 4 shapes, two layers have 16, and three layers have 64. A single topology runs that shape with learning on, then the same shape frozen.
 
-That capture replaces the earlier simulation log in `results/`.
+The diagram draws the shape that is running. Neuron 0 of every column is on the same row. A blue arrow is the one mux into a hidden neuron. A green arrow is its strong output class. Under the diagram, each test input appears with its label and the class the network chose. The score shows neurons, spikes, and energy. Energy is one mux event per hidden spike, plus one addition into each class for every last-layer spike.
 
-The transmission is a few seconds long. If SW0 was already down when you started the script, the run already finished and the bytes are gone. Slide SW0 up, start the script again, then slide SW0 down.
+**Topology** switches among finished shapes. **Results** names the learned shape with the best accuracy, and a cheaper shape when another learned shape ties that accuracy at lower energy.
 
-## 6. What the LEDs mean
+LD7 turns on when the sweep starts and turns off when the board is waiting again. Leave SW0 down and press Run to start another selection.
+
+## 9. Files
+
+Each Run creates `results\sweeps\<date>_<time>\`. Lines are written as they arrive.
+
+| File | What it holds |
+| --- | --- |
+| `uart_log.txt` | Every line from the board |
+| `metrics.csv` | Score, neurons, spikes, and energy |
+| `trials.csv` | Label and prediction for every test sample |
+| `mux.csv` | Where each mux pointed at the end of the pass |
+| `rasters.csv` | Spikes at every step |
+| `summary.md` | The scores in a table |
+
+Git ignores `results/`. The folder is still on disk. Open it in File Explorer.
+
+## 10. LEDs
 
 | LED | Meaning |
 | --- | --- |
-| LD0–LD3 | Case number, in binary. It counts from 0 through 9. |
-| LD4 | On during the reconfigurable pass of the current case. Off during the frozen pass. |
-| LD5 | The network is busy on a sample. |
-| LD6 | A UART byte is in flight. |
-| LD7 | On when every case has been sent. |
+| LD0–LD3 | Dataset number, in binary |
+| LD4 | On during a learned pass. Off during a frozen pass |
+| LD5 | The network is busy on a sample |
+| LD6 | A UART byte is in flight |
+| LD7 | On while a sweep is running. Off while the board is waiting |
 
-LD7 staying on means the FPGA finished. The laptop still has to have been listening from the moment SW0 went down.
+## If nothing arrives
 
-To run it again: SW0 up, start the script, SW0 down.
+The status line says so after about 20 seconds.
+
+1. SW0 must be down. Up is reset, and a command sent during reset is ignored.
+2. JA pin 1 must go to the adapter RX, and JA pin 2 to the adapter TX.
+3. **Port** must be the adapter COM port, not the PROG cable, and not the word `Icarus`.
+4. The programmed file must be `study_top.bit` from this build.
+5. Slide SW0 up, then down, and press Run again.
+
+## Simulate on a PC that has Icarus
+
+This step is optional. The lab ZedBoard run does not use it.
+
+If `iverilog` and `vvp` are installed, the console starts with **Port** set to `Icarus`. Press **Run** and the same two-byte command is simulated on that PC. One small dataset and one topology is the short check. All topologies takes much longer. Type a COM name instead when a board is connected.

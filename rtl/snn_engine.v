@@ -20,6 +20,9 @@ module snn_engine #(
   input  wire              learn_en,
   input  wire              train,
   input  wire [3:0]        n_layers,
+  input  wire [3:0]        n_h0,
+  input  wire [3:0]        n_h1,
+  input  wire [3:0]        n_h2,
   input  wire [6:0]        n_in,
   input  wire [3:0]        n_class,
   input  wire [3:0]        label,
@@ -40,7 +43,8 @@ module snn_engine #(
   output reg  [N_OUT-1:0] saw_out,
   output reg  [STEPS*MAX_IN-1:0] rast_in,
   output reg  [STEPS*MAX_L*H-1:0] rast_h,
-  output reg  [STEPS*N_OUT-1:0] rast_out
+  output reg  [STEPS*N_OUT-1:0] rast_out,
+  output wire [MAX_L*H*6-1:0] mux_bus
 );
 
   localparam [7:0] LEAK     = 8'd5;
@@ -102,6 +106,25 @@ module snn_engine #(
         hebb = w;
     end
   endfunction
+
+  function [3:0] nh_of;
+    input integer layer;
+    begin
+      if (layer == 0)
+        nh_of = n_h0;
+      else if (layer == 1)
+        nh_of = n_h1;
+      else
+        nh_of = n_h2;
+    end
+  endfunction
+
+  genvar gi;
+  generate
+    for (gi = 0; gi < MAX_L * H; gi = gi + 1) begin : pack_mux
+      assign mux_bus[gi * 6 +: 6] = mux_sel[gi];
+    end
+  endgenerate
 
   function [10:0] lif8;
     input [7:0] v;
@@ -223,7 +246,7 @@ module snn_engine #(
             for (h = 0; h < H; h = h + 1) begin
               idx = l * H + h;
               src = mux_sel[idx];
-              if (l >= n_layers)
+              if (l >= n_layers || h >= nh_of(l))
                 cur = 12'd0;
               else if (l == 0)
                 cur = sp_i[src] ? {4'd0, w_h[idx]} : 12'd0;
@@ -235,7 +258,7 @@ module snn_engine #(
               v_h[idx] <= nv[7:0];
               frame_h[idx] <= frame_h[idx] | nv[10];
               rast_h[step_i * MAX_L * H + idx] <= nv[10];
-              if (nv[10] && l < n_layers) begin
+              if (nv[10] && l < n_layers && h < nh_of(l)) begin
                 if (l == 0) n_add_h0 = n_add_h0 + 1;
                 else if (l == 1) n_add_h1 = n_add_h1 + 1;
                 else n_add_h2 = n_add_h2 + 1;
@@ -250,7 +273,7 @@ module snn_engine #(
             if (o < n_class) begin
               for (h = 0; h < H; h = h + 1) begin
                 idx = (n_layers - 1) * H + h;
-                if (sp_h[idx])
+                if (h < nh_of(n_layers - 1) && sp_h[idx])
                   acc = acc + w_o[idx * N_OUT + o];
               end
             end
@@ -286,16 +309,17 @@ module snn_engine #(
                     end
                 end else begin
                   for (pre = 0; pre < H; pre = pre + 1)
-                    if (!found_pre && frame_h[(l - 1) * H + pre]) begin
+                    if (!found_pre && pre < nh_of(l - 1) && frame_h[(l - 1) * H + pre]) begin
                       found_pre = 1'b1;
                       first_pre = pre[5:0];
                     end
                 end
                 for (h = 0; h < H; h = h + 1)
-                  if ((owned[l * H + h] || frame_h[l * H + h]) &&
+                  if (h < nh_of(l) && (owned[l * H + h] || frame_h[l * H + h]) &&
                       mux_sel[l * H + h] == first_pre && found_pre)
                     already = 1'b1;
                 for (h = 0; h < H; h = h + 1) begin
+                  if (h < nh_of(l)) begin
                   idx = l * H + h;
                   src = mux_sel[idx];
                   if (l == 0)
@@ -313,6 +337,7 @@ module snn_engine #(
                   if (l + 1 == n_layers && label < n_class)
                     w_o[idx * N_OUT + label] <= hebb(
                       w_o[idx * N_OUT + label], frame_h[idx], 1'b1);
+                  end
                 end
               end
             end
@@ -336,9 +361,9 @@ module snn_engine #(
               pass_h[h] <= pass_h[h] | frame_h[h];
               pass_h[H + h] <= pass_h[H + h] | frame_h[H + h];
               pass_h[2 * H + h] <= pass_h[2 * H + h] | frame_h[2 * H + h];
-              if (pass_h[h] | frame_h[h]) c0 = c0 + 8'd1;
-              if ((pass_h[H + h] | frame_h[H + h]) && n_layers > 4'd1) c1 = c1 + 8'd1;
-              if ((pass_h[2 * H + h] | frame_h[2 * H + h]) && n_layers > 4'd2) c2 = c2 + 8'd1;
+              if (h < n_h0 && (pass_h[h] | frame_h[h])) c0 = c0 + 8'd1;
+              if (h < n_h1 && (pass_h[H + h] | frame_h[H + h]) && n_layers > 4'd1) c1 = c1 + 8'd1;
+              if (h < n_h2 && (pass_h[2 * H + h] | frame_h[2 * H + h]) && n_layers > 4'd2) c2 = c2 + 8'd1;
             end
             util0 <= c0;
             util1 <= c1;

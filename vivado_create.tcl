@@ -10,6 +10,7 @@ set rtl_files [list \
   [file join $script_dir rtl snn_engine.v] \
   [file join $script_dir rtl study_rom.v] \
   [file join $script_dir rtl uart_tx.v] \
+  [file join $script_dir rtl uart_rx.v] \
 ]
 
 set xdc_file [file join $script_dir constraints zedboard_study.xdc]

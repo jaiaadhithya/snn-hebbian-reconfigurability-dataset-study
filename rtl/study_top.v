@@ -1,8 +1,12 @@
 `timescale 1ns / 1ps
-// Runs every stored case twice: frozen mux/weights, then the same samples
-// with Hebbian updates and neuron recruitment. Scores and per-step rasters
-// leave on uart_tx as ASCII lines. The host only records; it does not
-// supply the samples.
+// Waits for a dataset command on uart_rx, then sweeps every width
+// combination. Each live layer is 2, 4, 6, or 8 neurons, chosen on its
+// own: 4 one-layer shapes, 16 two-layer shapes, 64 three-layer shapes.
+// Learning runs all 84, then the same 84 run frozen.
+// First UART byte: '0'..'9' one dataset, 'A' every dataset.
+// Second byte: 0..83 one shape, 8'hFF every shape.
+// One shape runs learned, then frozen. All shapes do the same.
+// Scores, rasters, and the final mux map leave on uart_tx.
 
 module study_top #(
   parameter integer CLK_HZ = 125000000,
@@ -10,33 +14,43 @@ module study_top #(
 )(
   input  wire       clk,
   input  wire       rst,
+  input  wire       uart_rx,
   output wire       uart_tx,
   output wire [7:0] leds
 );
 
-  localparam [3:0] ST_RST_PASS = 4'd0;
-  localparam [3:0] ST_GO       = 4'd1;
-  localparam [3:0] ST_WAIT     = 4'd2;
-  localparam [3:0] ST_PREP_R   = 4'd3;
-  localparam [3:0] ST_WAIT_R   = 4'd4;
-  localparam [3:0] ST_PREP_T   = 4'd5;
-  localparam [3:0] ST_WAIT_T   = 4'd6;
-  localparam [3:0] ST_NEXT     = 4'd7;
-  localparam [3:0] ST_PREP_M   = 4'd8;
-  localparam [3:0] ST_WAIT_M   = 4'd9;
-  localparam [3:0] ST_ADV      = 4'd10;
-  localparam [3:0] ST_PREP_Z   = 4'd11;
-  localparam [3:0] ST_WAIT_Z   = 4'd12;
-  localparam [3:0] ST_HALT     = 4'd13;
+  localparam [4:0] ST_RST_PASS = 5'd0;
+  localparam [4:0] ST_GO       = 5'd1;
+  localparam [4:0] ST_WAIT     = 5'd2;
+  localparam [4:0] ST_PREP_R   = 5'd3;
+  localparam [4:0] ST_WAIT_R   = 5'd4;
+  localparam [4:0] ST_PREP_T   = 5'd5;
+  localparam [4:0] ST_WAIT_T   = 5'd6;
+  localparam [4:0] ST_NEXT     = 5'd7;
+  localparam [4:0] ST_PREP_M   = 5'd8;
+  localparam [4:0] ST_WAIT_M   = 5'd9;
+  localparam [4:0] ST_ADV      = 5'd10;
+  localparam [4:0] ST_PREP_Z   = 5'd11;
+  localparam [4:0] ST_WAIT_Z   = 5'd12;
+  localparam [4:0] ST_HALT     = 5'd13;
+  localparam [4:0] ST_IDLE     = 5'd14;
+  localparam [4:0] ST_PREP_H   = 5'd15;
+  localparam [4:0] ST_WAIT_H   = 5'd16;
+  localparam [4:0] ST_PREP_X   = 5'd17;
+  localparam [4:0] ST_WAIT_X   = 5'd18;
+  localparam [4:0] ST_WAIT_TOPO = 5'd19;
 
   localparam [1:0] PS_IDLE = 2'd0;
   localparam [1:0] PS_HIGH = 2'd1;
   localparam [1:0] PS_LOW  = 2'd2;
 
-  reg [3:0] state;
+  reg [4:0] state;
   reg [3:0] case_i;
   reg [7:0] sample_i;
   reg       mode;
+  reg       run_all;
+  reg       sweep_one;
+  reg [6:0] sweep_i;
   reg [7:0] correct;
   reg [3:0] step_send;
   reg       finished;
@@ -45,7 +59,7 @@ module study_top #(
   reg        go;
   reg        arm;
   reg [6:0]  msg_len;
-  reg [7:0]  msg [0:79];
+  reg [7:0]  msg [0:95];
   integer    wr;
 
   reg [1:0]  pst;
@@ -59,7 +73,7 @@ module study_top #(
   wire [3:0]  label;
   wire        train;
   wire [1:0]  group;
-  wire [3:0]  n_layers;
+  wire [3:0]  rom_layers;
   wire [6:0]  n_in;
   wire [3:0]  n_class;
   wire [7:0]  n_train;
@@ -78,11 +92,56 @@ module study_top #(
   wire [8*64-1:0] rast_in;
   wire [8*24-1:0] rast_h;
   wire [8*10-1:0] rast_out;
+  wire [3*8*6-1:0] mux_bus;
+  wire [7:0] rx_data;
+  wire       rx_valid;
+
+  reg [3:0] use_layers;
+  reg [3:0] use_h0;
+  reg [3:0] use_h1;
+  reg [3:0] use_h2;
+  reg [6:0] sweep_local;
+  reg [5:0] mux_slice;
 
   reg [63:0] slice_in;
   reg [23:0] slice_h;
   reg [11:0] slice_out;
   integer b;
+
+  function [3:0] width_of;
+    input [1:0] code;
+    begin
+      case (code)
+        2'd0: width_of = 4'd2;
+        2'd1: width_of = 4'd4;
+        2'd2: width_of = 4'd6;
+        default: width_of = 4'd8;
+      endcase
+    end
+  endfunction
+
+  // 0..3: one layer. 4..19: two layers. 20..83: three layers.
+  // Inside a depth, layer 1 changes first, then layer 2, then layer 3.
+  always @(*) begin
+    use_layers = 4'd1;
+    use_h0 = 4'd2;
+    use_h1 = 4'd0;
+    use_h2 = 4'd0;
+    if (sweep_i < 7'd4) begin
+      use_h0 = width_of(sweep_i[1:0]);
+    end else if (sweep_i < 7'd20) begin
+      use_layers = 4'd2;
+      sweep_local = sweep_i - 7'd4;
+      use_h0 = width_of(sweep_local[1:0]);
+      use_h1 = width_of(sweep_local[3:2]);
+    end else begin
+      use_layers = 4'd3;
+      sweep_local = sweep_i - 7'd20;
+      use_h0 = width_of(sweep_local[1:0]);
+      use_h1 = width_of(sweep_local[3:2]);
+      use_h2 = width_of(sweep_local[5:4]);
+    end
+  end
 
   function [7:0] hexch;
     input [3:0] n;
@@ -101,7 +160,7 @@ module study_top #(
     .label(label),
     .train(train),
     .group(group),
-    .n_layers(n_layers),
+    .n_layers(rom_layers),
     .n_in(n_in),
     .n_class(n_class),
     .n_train(n_train),
@@ -116,7 +175,10 @@ module study_top #(
     .go(go),
     .learn_en(mode),
     .train(train),
-    .n_layers(n_layers),
+    .n_layers(use_layers),
+    .n_h0(use_h0),
+    .n_h1(use_h1),
+    .n_h2(use_h2),
     .n_in(n_in),
     .n_class(n_class),
     .label(label),
@@ -137,7 +199,16 @@ module study_top #(
     .saw_out(saw_out),
     .rast_in(rast_in),
     .rast_h(rast_h),
-    .rast_out(rast_out)
+    .rast_out(rast_out),
+    .mux_bus(mux_bus)
+  );
+
+  uart_rx #(.CLK_HZ(CLK_HZ), .BAUD(BAUD)) rxer (
+    .clk(clk),
+    .rst(rst),
+    .rx(uart_rx),
+    .data(rx_data),
+    .valid(rx_valid)
   );
 
   uart_tx #(.CLK_HZ(CLK_HZ), .BAUD(BAUD)) uart (
@@ -192,10 +263,13 @@ module study_top #(
 
   always @(posedge clk) begin
     if (rst) begin
-      state <= ST_RST_PASS;
+      state <= ST_IDLE;
       case_i <= 4'd0;
       sample_i <= 8'd0;
-      mode <= 1'b0;
+      mode <= 1'b1;
+      run_all <= 1'b0;
+      sweep_one <= 1'b0;
+      sweep_i <= 7'd0;
       correct <= 8'd0;
       step_send <= 4'd0;
       finished <= 1'b0;
@@ -208,6 +282,60 @@ module study_top #(
       go <= 1'b0;
       arm <= 1'b0;
       case (state)
+        ST_IDLE: begin
+          if (rx_valid) begin
+            if (rx_data >= "0" && rx_data <= "9") begin
+              case_i <= rx_data[3:0];
+              run_all <= 1'b0;
+              state <= ST_WAIT_TOPO;
+            end else if (rx_data == "A" || rx_data == "a") begin
+              case_i <= 4'd0;
+              run_all <= 1'b1;
+              state <= ST_WAIT_TOPO;
+            end
+          end
+        end
+        ST_WAIT_TOPO: begin
+          if (rx_valid) begin
+            if (rx_data == 8'hFF) begin
+              sweep_one <= 1'b0;
+              sweep_i <= 7'd0;
+              mode <= 1'b1;
+              finished <= 1'b0;
+              state <= ST_PREP_H;
+            end else if (rx_data <= 8'd83) begin
+              sweep_one <= 1'b1;
+              sweep_i <= rx_data[6:0];
+              mode <= 1'b1;
+              finished <= 1'b0;
+              state <= ST_PREP_H;
+            end
+          end
+        end
+        ST_PREP_H: begin
+          wr = 0;
+          msg[wr] = "H"; wr = wr + 1;
+          msg[wr] = ","; wr = wr + 1;
+          msg[wr] = hexch(case_i); wr = wr + 1;
+          msg[wr] = ","; wr = wr + 1;
+          msg[wr] = mode ? "1" : "0"; wr = wr + 1;
+          msg[wr] = ","; wr = wr + 1;
+          msg[wr] = hexch(use_layers); wr = wr + 1;
+          msg[wr] = ","; wr = wr + 1;
+          msg[wr] = hexch(use_h0); wr = wr + 1;
+          msg[wr] = ","; wr = wr + 1;
+          msg[wr] = hexch(use_h1); wr = wr + 1;
+          msg[wr] = ","; wr = wr + 1;
+          msg[wr] = hexch(use_h2); wr = wr + 1;
+          msg[wr] = 8'h0A; wr = wr + 1;
+          msg_len <= wr[6:0];
+          arm <= 1'b1;
+          state <= ST_WAIT_H;
+        end
+        ST_WAIT_H: begin
+          if (send_done)
+            state <= ST_RST_PASS;
+        end
         ST_RST_PASS: begin
           pass_rst <= 1'b1;
           correct <= 8'd0;
@@ -319,7 +447,13 @@ module study_top #(
           msg[wr] = ","; wr = wr + 1;
           msg[wr] = mode ? "1" : "0"; wr = wr + 1;
           msg[wr] = ","; wr = wr + 1;
-          msg[wr] = hexch(n_layers); wr = wr + 1;
+          msg[wr] = hexch(use_layers); wr = wr + 1;
+          msg[wr] = ","; wr = wr + 1;
+          msg[wr] = hexch(use_h0); wr = wr + 1;
+          msg[wr] = ","; wr = wr + 1;
+          msg[wr] = hexch(use_h1); wr = wr + 1;
+          msg[wr] = ","; wr = wr + 1;
+          msg[wr] = hexch(use_h2); wr = wr + 1;
           msg[wr] = ","; wr = wr + 1;
           msg[wr] = hexch({1'b0, n_in[6:4]}); wr = wr + 1;
           msg[wr] = hexch(n_in[3:0]); wr = wr + 1;
@@ -372,16 +506,64 @@ module study_top #(
         end
         ST_WAIT_M: begin
           if (send_done)
+            state <= ST_PREP_X;
+        end
+        ST_PREP_X: begin
+          wr = 0;
+          msg[wr] = "X"; wr = wr + 1;
+          msg[wr] = ","; wr = wr + 1;
+          msg[wr] = hexch(case_i); wr = wr + 1;
+          msg[wr] = ","; wr = wr + 1;
+          msg[wr] = mode ? "1" : "0"; wr = wr + 1;
+          msg[wr] = ","; wr = wr + 1;
+          msg[wr] = hexch(use_layers); wr = wr + 1;
+          msg[wr] = ","; wr = wr + 1;
+          msg[wr] = hexch(use_h0); wr = wr + 1;
+          msg[wr] = ","; wr = wr + 1;
+          msg[wr] = hexch(use_h1); wr = wr + 1;
+          msg[wr] = ","; wr = wr + 1;
+          msg[wr] = hexch(use_h2); wr = wr + 1;
+          msg[wr] = ","; wr = wr + 1;
+          for (b = 0; b < 24; b = b + 1) begin
+            mux_slice = mux_bus[b * 6 +: 6];
+            msg[wr] = hexch({2'b00, mux_slice[5:4]}); wr = wr + 1;
+            msg[wr] = hexch(mux_slice[3:0]); wr = wr + 1;
+          end
+          msg[wr] = 8'h0A; wr = wr + 1;
+          msg_len <= wr[6:0];
+          arm <= 1'b1;
+          state <= ST_WAIT_X;
+        end
+        ST_WAIT_X: begin
+          if (send_done)
             state <= ST_ADV;
         end
         ST_ADV: begin
-          if (!mode) begin
-            mode <= 1'b1;
-            state <= ST_RST_PASS;
-          end else if ({4'd0, case_i} + 8'd1 < n_cases) begin
-            case_i <= case_i + 4'd1;
+          if (sweep_one) begin
+            if (mode) begin
+              mode <= 1'b0;
+              state <= ST_PREP_H;
+            end else if (run_all && {4'd0, case_i} + 8'd1 < n_cases) begin
+              case_i <= case_i + 4'd1;
+              mode <= 1'b1;
+              state <= ST_PREP_H;
+            end else
+              state <= ST_PREP_Z;
+          end else if (mode && sweep_i != 7'd83) begin
+            sweep_i <= sweep_i + 7'd1;
+            state <= ST_PREP_H;
+          end else if (mode) begin
             mode <= 1'b0;
-            state <= ST_RST_PASS;
+            sweep_i <= 7'd0;
+            state <= ST_PREP_H;
+          end else if (sweep_i != 7'd83) begin
+            sweep_i <= sweep_i + 7'd1;
+            state <= ST_PREP_H;
+          end else if (run_all && {4'd0, case_i} + 8'd1 < n_cases) begin
+            case_i <= case_i + 4'd1;
+            mode <= 1'b1;
+            sweep_i <= 7'd0;
+            state <= ST_PREP_H;
           end else
             state <= ST_PREP_Z;
         end
@@ -398,8 +580,11 @@ module study_top #(
             state <= ST_HALT;
           end
         end
-        ST_HALT: finished <= 1'b1;
-        default: state <= ST_RST_PASS;
+        ST_HALT: begin
+          finished <= 1'b1;
+          state <= ST_IDLE;
+        end
+        default: state <= ST_IDLE;
       endcase
     end
   end
@@ -408,6 +593,6 @@ module study_top #(
   assign leds[4]   = mode;
   assign leds[5]   = busy;
   assign leds[6]   = (pst != PS_IDLE);
-  assign leds[7]   = finished;
+  assign leds[7]   = (state != ST_IDLE);
 
 endmodule

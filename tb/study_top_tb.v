@@ -1,48 +1,74 @@
 `timescale 1ns / 1ps
-// Decodes the study UART and writes the same text the laptop will see.
+// Drives the two-byte command the console sends, and prints the UART text.
+// +CASE= is the dataset byte ('0' is 48, 'A' is 65). +TOPO= is 0..83, or 255 for every shape.
 
 module study_top_tb;
   reg clk = 0;
   reg rst = 1;
+  reg uart_rx = 1;
   wire uart_tx;
   wire [7:0] leds;
 
-  localparam integer CLK_HZ = 460800;
+  localparam integer CLK_HZ = 921600;
   localparam integer BAUD = 115200;
   localparam integer CLKS = CLK_HZ / BAUD;
+  localparam integer STDOUT = 32'h8000_0001;
 
   study_top #(.CLK_HZ(CLK_HZ), .BAUD(BAUD)) dut (
     .clk(clk),
     .rst(rst),
+    .uart_rx(uart_rx),
     .uart_tx(uart_tx),
     .leds(leds)
   );
 
   always #4 clk = ~clk;
 
-  integer fd;
   integer cycles;
+  integer cmd_case;
+  integer cmd_topo;
   reg rx_busy;
   reg [15:0] rx_cnt;
   reg [3:0] rx_bit;
   reg [7:0] rx_shift;
   reg saw_z;
 
+  task send_byte;
+    input [7:0] data;
+    integer i;
+    begin
+      uart_rx = 1'b0;
+      repeat (CLKS) @(posedge clk);
+      for (i = 0; i < 8; i = i + 1) begin
+        uart_rx = data[i];
+        repeat (CLKS) @(posedge clk);
+      end
+      uart_rx = 1'b1;
+      repeat (CLKS * 2) @(posedge clk);
+    end
+  endtask
+
   initial begin
-    fd = $fopen("results/uart_log.txt", "w");
+    cmd_case = 48;
+    cmd_topo = 0;
+    $value$plusargs("CASE=%d", cmd_case);
+    $value$plusargs("TOPO=%d", cmd_topo);
     rx_busy = 0;
     saw_z = 0;
     cycles = 0;
     repeat (8) @(posedge clk);
     rst = 0;
+    repeat (20) @(posedge clk);
+    send_byte(cmd_case[7:0]);
+    send_byte(cmd_topo[7:0]);
   end
 
   always @(posedge clk) begin
     if (!rst) begin
       cycles = cycles + 1;
-      if (cycles == 8000000) begin
+      if (cycles == 400000000) begin
         $display("TIMEOUT");
-        $fclose(fd);
+        $fflush(STDOUT);
         $finish;
       end
       if (!rx_busy && uart_tx == 1'b0) begin
@@ -56,13 +82,14 @@ module study_top_tb;
             rx_bit <= rx_bit + 4'd1;
             rx_cnt <= CLKS - 1;
           end else begin
-            $fwrite(fd, "%c", rx_shift);
-            $write("%c", rx_shift);
+            $fwrite(STDOUT, "%c", rx_shift);
+            if (rx_shift == 8'h0A)
+              $fflush(STDOUT);
             if (rx_shift == "Z")
               saw_z <= 1'b1;
             if (saw_z && rx_shift == 8'h0A) begin
-              $fclose(fd);
-              $display("\nDONE cycles=%0d", cycles);
+              $display("DONE cycles=%0d", cycles);
+              $fflush(STDOUT);
               $finish;
             end
             rx_busy <= 1'b0;

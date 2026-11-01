@@ -19,6 +19,7 @@ set_property PACKAGE_PIN U19 [get_ports {leds[6]}]
 set_property PACKAGE_PIN U14 [get_ports {leds[7]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {leds[*]}]
 
-# PMOD JA1 — UART TX into a 3.3 V USB-serial adapter RX. GND on JA pin 5 or 11.
+# PMOD JA1 TX -> adapter RX. PMOD JA2 RX <- adapter TX. GND on JA pin 5 or 11.
 set_property PACKAGE_PIN Y11 [get_ports uart_tx]
-set_property IOSTANDARD LVCMOS33 [get_ports uart_tx]
+set_property PACKAGE_PIN AA11 [get_ports uart_rx]
+set_property IOSTANDARD LVCMOS33 [get_ports {uart_tx uart_rx}]

@@ -4,6 +4,10 @@ This study runs on the ZedBoard. Both networks are the same circuit. The frozen 
 
 Full MNIST does not fit in this bitstream. A 28×28 image is 784 pixels, and the training set is 60,000 of them. The large-input cases below are 8×8 binary patterns: 64 inputs and 10 classes, which is the same kind of comparison (many inputs, many classes) at a size the FPGA can store and run by itself.
 
+## Sweep
+
+The board does not use the layer count stored with the dataset. For the selected dataset it runs every width combination. Each live layer is 2, 4, 6, or 8 neurons, chosen independently: 4 one-layer shapes, 16 two-layer shapes, and 64 three-layer shapes. Learning is on for all 84. It then repeats the same 84 with learning off. A topology is the shape. Reconfiguration is justified when some learned shape beats the frozen one-layer network of 8 neurons, or when learning beats the frozen copy of the same shape.
+
 ## Network
 
 - Up to 3 hidden layers, 8 neurons each, selected at runtime with `n_layers`.

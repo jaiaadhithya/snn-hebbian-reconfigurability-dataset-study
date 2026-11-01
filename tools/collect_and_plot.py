@@ -29,11 +29,27 @@ def parse_log(text: str) -> tuple[list[dict], list[dict], list[dict], bool]:
             continue
         part = line.split(",")
         kind = part[0]
-        if kind == "M" and len(part) == 16:
+        if kind == "M" and len(part) == 17:
             metrics.append({
                 "case": int(part[1], 16),
                 "mode": int(part[2], 16),
                 "layers": int(part[3], 16),
+                "n_h": int(part[4], 16),
+                "n_in": int(part[5], 16),
+                "n_class": int(part[6], 16),
+                "n_test": int(part[7], 16),
+                "correct": int(part[8], 16),
+                "util": [int(part[9], 16), int(part[10], 16), int(part[11], 16)],
+                "spikes_in": int(part[12], 16),
+                "spikes_h": [int(part[13], 16), int(part[14], 16), int(part[15], 16)],
+                "spikes_out": int(part[16], 16),
+            })
+        elif kind == "M" and len(part) == 16:
+            metrics.append({
+                "case": int(part[1], 16),
+                "mode": int(part[2], 16),
+                "layers": int(part[3], 16),
+                "n_h": 8,
                 "n_in": int(part[4], 16),
                 "n_class": int(part[5], 16),
                 "n_test": int(part[6], 16),

@@ -1,4 +1,6 @@
+build/
 results/
+__pycache__/
 fpga_reconfig_study/
 .Xil/
 *.jou
